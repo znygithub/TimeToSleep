@@ -1,26 +1,31 @@
 import Cocoa
 
-// MARK: - Quotes (rotate every 30s on lock screen)
+// MARK: - Daily quotes (one per day, not rotating)
 
 let quotes: [String] = [
     "能按时关掉屏幕的人，不会过得太差",
-    "能早睡早起的人，就是世界上最优秀的人",
-    "你做到了大多数人做不到的事：关掉电脑",
-    "自律的人不是不想玩，是知道什么时候该停",
+    "能早睡早起的人，\n就是世界上最优秀的人",
+    "你做到了大多数人做不到的事：\n关掉电脑",
+    "自律的人不是不想玩，\n是知道什么时候该停",
     "睡饱的人，运气不会太差",
     "明天的你会感谢现在的你",
-    "还记得上次早睡早起，精力充沛的自己么",
+    "还记得上次早睡早起，\n精力充沛的自己么",
     "睡一觉，好主意自己会来找你",
-    "深度睡眠发生在入睡后的前几个小时，越早睡越赚",
-    "睡眠不足时，大脑的决策能力和喝醉差不多",
+    "深度睡眠发生在入睡后的前几个小时，\n越早睡越赚",
+    "睡眠不足时，\n大脑的决策能力和喝醉差不多",
 ]
+
+func todayQuote() -> String {
+    let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
+    return quotes[day % quotes.count]
+}
 
 // MARK: - Config
 
 struct SleepConfig {
     let wakeupTime: String
     let bedtime: String
-    let activeDays: Set<Int>  // 1=Mon ... 7=Sun
+    let activeDays: Set<Int>
 
     static func load() -> SleepConfig {
         let configPath = NSHomeDirectory() + "/.timetosleep/config.json"
@@ -46,17 +51,9 @@ struct SleepConfig {
 
 // MARK: - Stats
 
-enum DayStatus { case completed, skipped, noData }
-
 struct SleepStats {
     let streak: Int
     let totalCompleted: Int
-    let totalNights: Int
-    let recentDays: [(String, DayStatus)]
-
-    var rate: Int {
-        totalNights > 0 ? Int(Double(totalCompleted) / Double(totalNights) * 100) : 0
-    }
 
     static func load(config: SleepConfig) -> SleepStats {
         let statsPath = NSHomeDirectory() + "/.timetosleep/stats.json"
@@ -68,7 +65,6 @@ struct SleepStats {
             records = recs
         }
 
-        let total = records.count
         let completed = records.filter { $0["status"] == "completed" }.count
 
         let cal = Calendar.current
@@ -80,13 +76,11 @@ struct SleepStats {
             return (d, s)
         })
 
-        // Streak: skip inactive days and skipped days
         var streak = 0
         var day = cal.date(byAdding: .day, value: -1, to: Date())!
         for _ in 0..<400 {
             let ds = df.string(from: day)
             let weekday = cal.component(.weekday, from: day)
-            // Convert from Apple's 1=Sun..7=Sat to ISO 1=Mon..7=Sun
             let isoWeekday = weekday == 1 ? 7 : weekday - 1
 
             if !config.activeDays.contains(isoWeekday) {
@@ -106,24 +100,7 @@ struct SleepStats {
             }
         }
 
-        // Recent 28 days for the grid
-        let dayFmt = DateFormatter()
-        dayFmt.dateFormat = "d"
-        var recent: [(String, DayStatus)] = []
-        for i in (0...27).reversed() {
-            let d = cal.date(byAdding: .day, value: -i, to: Date())!
-            let ds = df.string(from: d)
-            let label = dayFmt.string(from: d)
-            let status: DayStatus
-            if let s = statusByDate[ds] {
-                status = s == "completed" ? .completed : .skipped
-            } else {
-                status = .noData
-            }
-            recent.append((label, status))
-        }
-
-        return SleepStats(streak: streak, totalCompleted: completed, totalNights: total, recentDays: recent)
+        return SleepStats(streak: streak, totalCompleted: completed)
     }
 }
 
@@ -210,72 +187,18 @@ class LockWindowController {
     }
 }
 
-// MARK: - Streak Grid View
-
-class StreakGridView: NSView {
-    let days: [(String, DayStatus)]
-    let cols = 7
-    let dotSize: CGFloat = 10
-    let gap: CGFloat = 6
-
-    init(frame: NSRect, days: [(String, DayStatus)]) {
-        self.days = days
-        super.init(frame: frame)
-        wantsLayer = true
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        let totalRows = Int(ceil(Double(days.count) / Double(cols)))
-        let cellSize = dotSize + gap
-        let gridWidth = CGFloat(cols) * cellSize - gap
-        let gridHeight = CGFloat(totalRows) * cellSize - gap
-        let offsetX = (bounds.width - gridWidth) / 2
-        let offsetY = (bounds.height - gridHeight) / 2
-
-        for (index, (_, status)) in days.enumerated() {
-            let col = index % cols
-            let row = totalRows - 1 - (index / cols)
-            let x = offsetX + CGFloat(col) * cellSize
-            let y = offsetY + CGFloat(row) * cellSize
-            let rect = CGRect(x: x, y: y, width: dotSize, height: dotSize)
-
-            let color: CGColor
-            switch status {
-            case .completed:
-                color = NSColor(red: 0.35, green: 0.75, blue: 0.45, alpha: 1.0).cgColor
-            case .skipped:
-                color = NSColor(white: 0.25, alpha: 1.0).cgColor
-            case .noData:
-                color = NSColor(white: 0.1, alpha: 1.0).cgColor
-            }
-            ctx.setFillColor(color)
-            ctx.fillEllipse(in: rect)
-        }
-    }
-}
-
 // MARK: - Lock Screen View
 
 class LockScreenView: NSView {
     let config: SleepConfig
     let stats: SleepStats
     private var timeLabel: NSTextField!
-    private var quoteLabel: NSTextField!
-    private var quoteTimer: Timer?
-    private var currentQuoteIndex: Int
 
     init(frame: NSRect, config: SleepConfig, stats: SleepStats) {
         self.config = config
         self.stats = stats
-        self.currentQuoteIndex = Int.random(in: 0..<quotes.count)
         super.init(frame: frame)
         setupUI()
-        startQuoteRotation()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -286,16 +209,18 @@ class LockScreenView: NSView {
         let gradient = CAGradientLayer()
         gradient.frame = bounds
         gradient.colors = [
-            NSColor(red: 0.04, green: 0.04, blue: 0.10, alpha: 1.0).cgColor,
-            NSColor(red: 0.01, green: 0.01, blue: 0.03, alpha: 1.0).cgColor
+            NSColor(red: 0.06, green: 0.06, blue: 0.12, alpha: 1.0).cgColor,
+            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1.0).cgColor
         ]
         gradient.startPoint = CGPoint(x: 0.5, y: 1.0)
         gradient.endPoint = CGPoint(x: 0.5, y: 0.0)
         layer?.addSublayer(gradient)
 
-        let containerHeight: CGFloat = 460
+        // ── Center content ──
+
+        let containerHeight: CGFloat = 320
         let container = NSView(frame: NSRect(
-            x: bounds.midX - 300, y: bounds.midY - containerHeight / 2,
+            x: bounds.midX - 300, y: bounds.midY - containerHeight / 2 + 30,
             width: 600, height: containerHeight
         ))
         container.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
@@ -303,118 +228,51 @@ class LockScreenView: NSView {
 
         var y: CGFloat = containerHeight
 
-        // Moon
-        y -= 50
-        container.addSubview(makeLabel(text: "🌙", fontSize: 36, color: .white,
-                                        frame: NSRect(x: 0, y: y, width: 600, height: 44)))
-
         // Time
-        y -= 85
-        timeLabel = makeLabel(text: currentTimeString(), fontSize: 72, color: .white,
-                              frame: NSRect(x: 0, y: y, width: 600, height: 85))
-        timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 72, weight: .ultraLight)
+        y -= 100
+        timeLabel = makeLabel(text: currentTimeString(), fontSize: 80, color: .white,
+                              frame: NSRect(x: 0, y: y, width: 600, height: 100))
+        timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 80, weight: .thin)
         container.addSubview(timeLabel)
 
-        // Hero stat: streak or total
-        y -= 48
+        // Streak or total
+        y -= 36
+        let statText: String
         if stats.streak > 0 {
-            let heroLabel = makeLabel(
-                text: "连续早睡 \(stats.streak) 天",
-                fontSize: 28, color: .white,
-                frame: NSRect(x: 0, y: y, width: 600, height: 38)
-            )
-            heroLabel.font = NSFont.systemFont(ofSize: 28, weight: .medium)
-            container.addSubview(heroLabel)
+            statText = "🔥 连续早睡第 \(stats.streak) 天"
         } else if stats.totalCompleted > 0 {
-            let heroLabel = makeLabel(
-                text: "累计早睡 \(stats.totalCompleted) 天",
-                fontSize: 28, color: .white,
-                frame: NSRect(x: 0, y: y, width: 600, height: 38)
-            )
-            heroLabel.font = NSFont.systemFont(ofSize: 28, weight: .medium)
-            container.addSubview(heroLabel)
+            statText = "累计早睡 \(stats.totalCompleted) 天"
         } else {
-            container.addSubview(makeLabel(
-                text: "今晚是新的开始",
-                fontSize: 20, color: NSColor(white: 0.5, alpha: 1.0),
-                frame: NSRect(x: 0, y: y, width: 600, height: 30)
-            ))
+            statText = "今晚是新的开始"
         }
+        container.addSubview(makeLabel(
+            text: statText, fontSize: 14,
+            color: NSColor(white: 0.5, alpha: 1.0),
+            frame: NSRect(x: 0, y: y, width: 600, height: 22)
+        ))
 
-        // Sub-stat line
-        y -= 26
-        if stats.streak > 0 && stats.totalCompleted > stats.streak {
-            container.addSubview(makeLabel(
-                text: "累计早睡 \(stats.totalCompleted) 天 · 守约率 \(stats.rate)%",
-                fontSize: 13, color: NSColor(white: 0.4, alpha: 1.0),
-                frame: NSRect(x: 0, y: y, width: 600, height: 20)
-            ))
-        } else if stats.totalNights > 0 {
-            container.addSubview(makeLabel(
-                text: "守约率 \(stats.rate)%",
-                fontSize: 13, color: NSColor(white: 0.4, alpha: 1.0),
-                frame: NSRect(x: 0, y: y, width: 600, height: 20)
-            ))
-        }
-
-        // Streak grid
-        y -= 82
-        let gridView = StreakGridView(
-            frame: NSRect(x: 120, y: y, width: 360, height: 70),
-            days: stats.recentDays
+        // Quote
+        y -= 70
+        let quoteLabel = makeLabel(
+            text: "「\(todayQuote())」",
+            fontSize: 18,
+            color: NSColor(white: 0.55, alpha: 1.0),
+            frame: NSRect(x: 40, y: y, width: 520, height: 60)
         )
-        container.addSubview(gridView)
-
-        // Grid legend
-        y -= 18
-        if stats.totalNights > 0 {
-            container.addSubview(makeLabel(
-                text: "最近 4 周",
-                fontSize: 11, color: NSColor(white: 0.25, alpha: 1.0),
-                frame: NSRect(x: 0, y: y, width: 600, height: 16)
-            ))
-        }
-
-        // Rotating quote
-        y -= 40
-        quoteLabel = makeLabel(
-            text: quotes[currentQuoteIndex],
-            fontSize: 15, color: NSColor(white: 0.4, alpha: 1.0),
-            frame: NSRect(x: 40, y: y, width: 520, height: 36)
-        )
-        quoteLabel.font = NSFont.systemFont(ofSize: 15, weight: .light)
+        quoteLabel.font = NSFont.systemFont(ofSize: 18, weight: .regular)
+        quoteLabel.maximumNumberOfLines = 3
         container.addSubview(quoteLabel)
 
-        // Wake time
-        y -= 36
-        container.addSubview(makeLabel(
-            text: "\(config.wakeupTime) 自动解锁",
-            fontSize: 12, color: NSColor(white: 0.2, alpha: 1.0),
-            frame: NSRect(x: 0, y: y, width: 600, height: 18)
-        ))
-    }
+        // ── Bottom: wake time ──
 
-    private func startQuoteRotation() {
-        quoteTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.rotateQuote()
-        }
-    }
-
-    private func rotateQuote() {
-        guard let label = quoteLabel else { return }
-
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 1.0
-            label.animator().alphaValue = 0.0
-        }, completionHandler: { [weak self] in
-            guard let self = self else { return }
-            self.currentQuoteIndex = (self.currentQuoteIndex + 1) % quotes.count
-            label.stringValue = quotes[self.currentQuoteIndex]
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 1.0
-                label.animator().alphaValue = 1.0
-            })
-        })
+        let bottomLabel = makeLabel(
+            text: "明早 \(config.wakeupTime) 自动解锁",
+            fontSize: 13,
+            color: NSColor(white: 0.25, alpha: 1.0),
+            frame: NSRect(x: 0, y: 40, width: bounds.width, height: 20)
+        )
+        bottomLabel.autoresizingMask = [.width, .minYMargin]
+        addSubview(bottomLabel)
     }
 
     private func makeLabel(text: String, fontSize: CGFloat, color: NSColor, frame: NSRect) -> NSTextField {

@@ -20,14 +20,8 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-if ! command -v swiftc &>/dev/null; then
-  ui_error "需要 Xcode Command Line Tools"
-  ui_dim "安装: xcode-select --install"
-  exit 1
-fi
-
 if ! command -v python3 &>/dev/null; then
-  ui_error "需要 Python 3"
+  ui_error "需要 Python 3（macOS 通常自带）"
   exit 1
 fi
 
@@ -35,25 +29,22 @@ ui_success "环境检查通过"
 
 # ── 2. Create install directory ──
 INSTALL_DIR="$HOME/.timetosleep"
-ui_step "创建安装目录: $INSTALL_DIR"
+ui_step "创建安装目录..."
 mkdir -p "$INSTALL_DIR/bin"
 mkdir -p "$INSTALL_DIR/lib"
 mkdir -p "$INSTALL_DIR/src"
 
-# ── 3. Compile Swift overlay ──
-ui_step "编译锁屏覆盖层..."
-bash "$SCRIPT_DIR/src/overlay/build.sh" "$INSTALL_DIR/bin/zzz-overlay"
-ui_success "编译完成"
-
-# ── 4. Copy files ──
+# ── 3. Copy files ──
 ui_step "安装文件..."
 cp -r "$SCRIPT_DIR/lib/"* "$INSTALL_DIR/lib/"
 cp -r "$SCRIPT_DIR/src/"* "$INSTALL_DIR/src/"
 cp "$SCRIPT_DIR/bin/zzz" "$INSTALL_DIR/bin/zzz"
+cp "$SCRIPT_DIR/bin/zzz-overlay" "$INSTALL_DIR/bin/zzz-overlay"
 chmod +x "$INSTALL_DIR/bin/zzz"
+chmod +x "$INSTALL_DIR/bin/zzz-overlay"
 chmod +x "$INSTALL_DIR/src/daemon.sh"
 
-# ── 5. Create symlink ──
+# ── 4. Create symlink ──
 ui_step "创建 zzz 命令..."
 
 LINKED=false
@@ -78,7 +69,6 @@ if [ "$LINKED" = false ]; then
       break
     fi
   done
-  # Always ensure .zshrc exists on macOS
   if [ "$LINKED" = false ]; then
     echo '# TimeToSleep' >> "$HOME/.zshrc"
     echo 'export PATH="$HOME/.timetosleep/bin:$PATH"' >> "$HOME/.zshrc"
@@ -88,7 +78,7 @@ if [ "$LINKED" = false ]; then
   ui_success "已添加到 PATH（重启终端或 source ~/.zshrc 生效）"
 fi
 
-# ── 6. Done ──
+# ── 5. Done ──
 ui_blank
 ui_box "$(printf '%b\n' \
   "${C_GREEN}${BOLD}安装完成！${RESET}" \

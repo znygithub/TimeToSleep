@@ -25,7 +25,7 @@ cd TimeToSleep
 bash install.sh
 ```
 
-需要 macOS、Xcode Command Line Tools（`xcode-select --install`）和 Python 3。
+需要 macOS 11+，无需安装其他依赖。
 
 ## 开始使用
 

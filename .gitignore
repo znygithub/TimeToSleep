@@ -3,8 +3,5 @@
 *.swo
 *~
 
-# Compiled binary (rebuild with install.sh)
-bin/zzz-overlay
-
 # Cursor IDE
 .cursor/

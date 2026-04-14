@@ -37,11 +37,10 @@ cmd_default() {
     return
   fi
 
-  local bedtime wakeup winddown message
+  local bedtime wakeup winddown
   bedtime=$(config_get "bedtime")
   wakeup=$(config_get "wakeup")
   winddown=$(config_get "winddown_minutes")
-  message=$(config_get "message")
 
   local bed_min now_min remaining
   bed_min=$(time_to_minutes "$bedtime")
@@ -67,9 +66,7 @@ cmd_default() {
       "" \
       "  还有 ${BOLD}${C_YELLOW}${hours} 小时 ${mins} 分钟${RESET}" \
       "  提前 ${winddown} 分钟开始提醒" \
-      "  起床 ${wakeup}" \
-      "" \
-      "  ${DIM}\"${message}\"${RESET}")"
+      "  起床 ${wakeup}")"
   elif [ "$active_today" = "否" ]; then
     ui_box "$(printf '%b\n' \
       "${C_GRAY}今天不在启用日，放松吧${RESET}" \
@@ -124,11 +121,10 @@ cmd_config() {
       return 1
     fi
 
-    local bedtime wakeup winddown message
+    local bedtime wakeup winddown
     bedtime=$(config_get "bedtime")
     wakeup=$(config_get "wakeup")
     winddown=$(config_get "winddown_minutes")
-    message=$(config_get "message")
 
     local days_display=""
     local day_names=("" "周一" "周二" "周三" "周四" "周五" "周六" "周日")
@@ -146,10 +142,9 @@ cmd_config() {
     ui_print "  起床时间    ${BOLD}$wakeup${RESET}"
     ui_print "  启用日      ${BOLD}$days_display${RESET}"
     ui_print "  提前提醒    ${BOLD}$winddown 分钟${RESET}"
-    ui_print "  锁屏文字    ${DIM}\"$message\"${RESET}"
     ui_blank
     ui_dim "修改: zzz config <key> <value>"
-    ui_dim "可用 key: bedtime, wakeup, winddown, message"
+    ui_dim "可用 key: bedtime, wakeup, winddown"
     ui_blank
     return
   fi
@@ -185,17 +180,9 @@ cmd_config() {
       schedule_update
       ui_success "提前提醒时间已更新为 $value 分钟"
       ;;
-    message)
-      if [ -z "$value" ]; then
-        ui_error "请提供锁屏文字"
-        return 1
-      fi
-      config_set "message" "$value"
-      ui_success "锁屏文字已更新"
-      ;;
     *)
       ui_error "未知设置: $key"
-      ui_dim "可用: bedtime, wakeup, winddown, message"
+      ui_dim "可用: bedtime, wakeup, winddown"
       return 1
       ;;
   esac

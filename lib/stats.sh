@@ -28,7 +28,7 @@ with open('$STATS_FILE', 'w') as f: json.dump(d, f, indent=2, ensure_ascii=False
 "
 }
 
-# Get current streak of consecutive "completed" nights
+# Get current streak — skips inactive days and skipped days (they don't break the streak)
 stats_streak() {
   stats_ensure
   python3 -c "
@@ -37,15 +37,36 @@ from datetime import datetime, timedelta
 
 with open('$STATS_FILE') as f: d = json.load(f)
 records = {r['date']: r['status'] for r in d.get('records', [])}
+
+# Load active days from config
+active_days = set()
+try:
+    with open('$ZZZ_CONFIG') as f: cfg = json.load(f)
+    active_days = set(str(x) for x in cfg.get('days', []))
+except: pass
+
 streak = 0
-day = datetime.now().date() - timedelta(days=1)  # start from yesterday
-while True:
+day = datetime.now().date() - timedelta(days=1)
+safety = 0
+while safety < 400:
+    safety += 1
     ds = day.strftime('%Y-%m-%d')
-    if records.get(ds) == 'completed':
+    weekday = str(day.isoweekday())  # 1=Mon ... 7=Sun
+
+    if weekday not in active_days:
+        day -= timedelta(days=1)
+        continue
+
+    status = records.get(ds, '')
+    if status == 'completed':
         streak += 1
         day -= timedelta(days=1)
+    elif status.startswith('skipped'):
+        day -= timedelta(days=1)
+        continue
     else:
         break
+
 print(streak)
 "
 }

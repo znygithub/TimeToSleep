@@ -49,10 +49,6 @@ run_init() {
     "45 分钟:45" \
     "60 分钟:60"
 
-  # ── personal message ──
-  local message
-  ui_input "写一句话给深夜的自己（锁屏时显示）" message "你是一个守承诺的人，说好了早睡就早睡。"
-
   # ── show contract ──
   ui_blank
 
@@ -70,8 +66,6 @@ run_init() {
     "  睡觉：${BOLD}$bedtime${RESET}    起床：${BOLD}$wakeup${RESET}" \
     "  启用：${BOLD}$days_display${RESET}" \
     "  提前 ${BOLD}$winddown 分钟${RESET}开始提醒" \
-    "" \
-    "  ${DIM}\"$message\"${RESET}" \
     "" \
     "  ${C_RED}锁定后到起床前，无法解锁。${RESET}")"
 
@@ -109,7 +103,6 @@ run_init() {
   "wakeup": "$wakeup",
   "days": $days_json,
   "winddown_minutes": $winddown,
-  "message": "$message",
   "activated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "version": "1.0.0"
 }

@@ -16,7 +16,7 @@ run_init() {
     "${BOLD}你即将和自己签一份早睡契约。${RESET}" \
     "" \
     "从今天起，到了约定的时间，" \
-    "电脑会替你守住这个承诺。" \
+    "电脑会替你守住这份约定。" \
     "" \
     "${DIM}锁定后到起床前，无法解锁。${RESET}")"
 
@@ -71,17 +71,17 @@ run_init() {
 
   ui_blank
 
-  # ── commitment ──
-  if ! ui_type_confirm "要激活 TimeToSleep，请输入你的承诺：" "我承诺早睡早起"; then
+  # ── activation phrase (type-to-confirm) ──
+  if ! ui_type_confirm "最后一步：请键入下面这句以激活：" "和晚睡说再见"; then
     ui_blank
-    ui_error "承诺未确认，设置已取消。"
+    ui_error "未正确输入，设置已取消。"
     ui_dim "想好了再来：zzz init"
     ui_blank
     return 1
   fi
 
   ui_blank
-  ui_success "承诺已确认！"
+  ui_success "已确认！"
 
   # ── save config ──
   config_ensure_dir

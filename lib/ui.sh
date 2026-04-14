@@ -24,6 +24,9 @@ C_DARK='\033[38;5;238m'
 ui_print() { printf "%b\n" "$*"; }
 ui_print_n() { printf "%b" "$*"; }
 
+# Wrap an ANSI escape for readline prompt (so readline knows it's non-printing)
+_rl() { printf '\001%b\002' "$1"; }
+
 ui_blank() { echo; }
 
 ui_header() {
@@ -93,23 +96,41 @@ ui_box() {
 # Usage: ui_input "prompt" variable_name [default]
 ui_input() {
   local prompt="$1" var_name="$2" default="$3"
-  local display_default=""
-  [ -n "$default" ] && display_default=" ${DIM}($default)${RESET}"
 
   ui_blank
-  ui_print_n "  ${C_PURPLE}?${RESET} ${BOLD}$prompt${RESET}${display_default} ${C_GRAY}›${RESET} "
+  local _rp="  $(_rl "$C_PURPLE")?$(_rl "$RESET") $(_rl "$BOLD")$prompt$(_rl "$RESET")"
+  [ -n "$default" ] && _rp+=" $(_rl "$DIM")($default)$(_rl "$RESET")"
+  _rp+=" $(_rl "$C_GRAY")›$(_rl "$RESET") "
   local answer
-  read -r answer
+  read -e -r -p "$_rp" answer
   [ -z "$answer" ] && answer="$default"
   eval "$var_name='$answer'"
 }
 
 # Parse flexible time input into HH:MM
-# Accepts: 23, 23:00, 2300, 23点, 23点30, 23点半, 11pm, 7:30am, etc.
+# Accepts: 23, 23:00, 2300, 23点, 23点30, 23点半, 11pm, 7:30am,
+#          六点, 六点半, 十一点, 二十三点三十, etc.
 _parse_time() {
   local raw="$1"
   # strip whitespace
   raw=$(echo "$raw" | tr -d ' ')
+
+  # Convert Chinese number words to digits: 六点半 → 6点半, 二十三 → 23
+  if [[ "$raw" =~ [零一二两三四五六七八九十] ]]; then
+    raw=$(python3 -c "
+import re, sys
+s = sys.argv[1]
+cn = {'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9}
+def to_num(t):
+    if '十' in t:
+        p = t.split('十', 1)
+        tens = cn.get(p[0], 1) if p[0] else 1
+        ones = cn.get(p[1], 0) if p[1] else 0
+        return str(tens * 10 + ones)
+    return str(cn[t]) if t in cn else t
+print(re.sub(r'[零一二两三四五六七八九十]+', lambda m: to_num(m.group()), s))
+" "$raw" 2>/dev/null) || true
+  fi
 
   local h="" m=""
 
@@ -154,7 +175,7 @@ ui_input_time() {
   while true; do
     ui_input "$prompt" _time_val "$default"
     local parsed
-    parsed=$(_parse_time "$_time_val")
+    parsed=$(_parse_time "$_time_val") || true
     if [ -n "$parsed" ]; then
       ui_print "  ${C_GREEN}✓${RESET} ${DIM}${parsed}${RESET}"
       eval "$var_name='$parsed'"
@@ -345,9 +366,9 @@ ui_type_confirm() {
     fi
     ui_print "  ${DIM}请输入：${RESET}${C_YELLOW}$phrase${RESET}"
     ui_blank
-    ui_print_n "  ${C_GRAY}›${RESET} "
+    local _rp="  $(_rl "$C_GRAY")›$(_rl "$RESET") "
     local answer
-    read -r answer
+    read -e -r -p "$_rp" answer
     # normalize: collapse all whitespace
     local norm_answer norm_phrase
     norm_answer=$(echo "$answer" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')

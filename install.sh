@@ -84,5 +84,15 @@ ui_blank
 ui_box "$(printf '%b\n' \
   "${C_GREEN}${BOLD}安装完成！${RESET}" \
   "" \
-  "运行 ${BOLD}zzz init${RESET} 开始设置你的早睡契约")"
+  "即将进入早睡契约设置...")"
 ui_blank
+
+sleep 1
+
+# ── 6. Launch onboarding in a visible Terminal window ──
+osascript -e "
+tell application \"Terminal\"
+    activate
+    do script \"'$INSTALL_DIR/bin/zzz' init\"
+end tell
+"

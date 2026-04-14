@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+# zzz — TimeToSleep CLI
+# A commitment device for sleeping early.
+
+set -e
+
+# Resolve install location
+ZZZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# If installed globally, ZZZ_ROOT is ~/.timetosleep
+# If running from source, ZZZ_ROOT is the project directory
+if [ -f "$ZZZ_ROOT/lib/config.sh" ]; then
+  LIB_DIR="$ZZZ_ROOT/lib"
+  SRC_DIR="$ZZZ_ROOT/src"
+elif [ -f "$HOME/.timetosleep/lib/config.sh" ]; then
+  LIB_DIR="$HOME/.timetosleep/lib"
+  SRC_DIR="$HOME/.timetosleep/src"
+else
+  echo "Error: TimeToSleep is not properly installed."
+  echo "Run install.sh first or check your installation."
+  exit 1
+fi
+
+source "$LIB_DIR/config.sh"
+source "$LIB_DIR/ui.sh"
+source "$LIB_DIR/stats.sh"
+
+# ── Commands ─────────────────────────────────────────────────────
+
+cmd_default() {
+  # No args: show tonight's status
+  if ! config_exists; then
+    ui_blank
+    ui_moon
+    ui_print "  ${DIM}还没有设置过。运行 ${RESET}${BOLD}zzz init${RESET}${DIM} 开始。${RESET}"
+    ui_blank
+    return
+  fi
+
+  local bedtime wakeup winddown message
+  bedtime=$(config_get "bedtime")
+  wakeup=$(config_get "wakeup")
+  winddown=$(config_get "winddown_minutes")
+  message=$(config_get "message")
+
+  local bed_min now_min remaining
+  bed_min=$(time_to_minutes "$bedtime")
+  now_min=$(now_minutes)
+  remaining=$(( bed_min - now_min ))
+  (( remaining < 0 )) && (( remaining += 1440 ))
+
+  local hours=$(( remaining / 60 ))
+  local mins=$(( remaining % 60 ))
+
+  local streak
+  streak=$(stats_streak)
+
+  local active_today="否"
+  is_active_today && active_today="是"
+
+  ui_blank
+  ui_moon
+
+  if [ "$active_today" = "是" ] && (( remaining > 0 && remaining < 720 )); then
+    ui_box "$(printf '%b\n' \
+      "${BOLD}今晚 ${bedtime} 锁定${RESET}" \
+      "" \
+      "  还有 ${BOLD}${C_YELLOW}${hours} 小时 ${mins} 分钟${RESET}" \
+      "  提前 ${winddown} 分钟开始提醒" \
+      "  起床 ${wakeup}" \
+      "" \
+      "  ${DIM}\"${message}\"${RESET}")"
+  elif [ "$active_today" = "否" ]; then
+    ui_box "$(printf '%b\n' \
+      "${C_GRAY}今天不在启用日，放松吧${RESET}" \
+      "" \
+      "  下次锁定时间请查看 ${BOLD}zzz config${RESET}")"
+  else
+    ui_box "$(printf '%b\n' \
+      "${C_GREEN}今晚已过锁定时间${RESET}" \
+      "" \
+      "  明天 ${BOLD}${bedtime}${RESET} 继续")"
+  fi
+
+  if (( streak > 0 )); then
+    ui_print "  ${C_GREEN}🔥${RESET} 连续早睡 ${BOLD}${streak}${RESET} 天"
+  fi
+
+  ui_blank
+}
+
+cmd_init() {
+  source "$SRC_DIR/init.sh"
+}
+
+cmd_status() {
+  cmd_default
+
+  # Extended stats
+  local summary
+  summary=$(stats_summary)
+  IFS='|' read -r total completed skipped installed <<< "$summary"
+
+  if (( total > 0 )); then
+    ui_print "  ${BOLD}统计${RESET}"
+    ui_print "  ${C_GRAY}────────────────────${RESET}"
+    ui_print "  总天数  ${BOLD}$total${RESET}"
+    ui_print "  守约    ${C_GREEN}${BOLD}$completed${RESET}"
+    ui_print "  跳过    ${C_YELLOW}${BOLD}$skipped${RESET}"
+    if (( total > 0 )); then
+      local rate
+      rate=$(python3 -c "print(f'{$completed/$total*100:.0f}')" 2>/dev/null || echo "?")
+      ui_print "  守约率  ${BOLD}${rate}%${RESET}"
+    fi
+    ui_blank
+  fi
+}
+
+cmd_config() {
+  if [ $# -eq 0 ]; then
+    # Show current config
+    if ! config_exists; then
+      ui_error "还没有配置。运行 zzz init"
+      return 1
+    fi
+
+    local bedtime wakeup winddown message
+    bedtime=$(config_get "bedtime")
+    wakeup=$(config_get "wakeup")
+    winddown=$(config_get "winddown_minutes")
+    message=$(config_get "message")
+
+    local days_display=""
+    local day_names=("" "周一" "周二" "周三" "周四" "周五" "周六" "周日")
+    local days
+    days=$(config_get_array "days")
+    while IFS= read -r d; do
+      [ -z "$d" ] && continue
+      [ -n "$days_display" ] && days_display+="、"
+      days_display+="${day_names[$d]}"
+    done <<< "$days"
+
+    ui_blank
+    ui_header "当前设置"
+    ui_print "  睡觉时间    ${BOLD}$bedtime${RESET}"
+    ui_print "  起床时间    ${BOLD}$wakeup${RESET}"
+    ui_print "  启用日      ${BOLD}$days_display${RESET}"
+    ui_print "  提前提醒    ${BOLD}$winddown 分钟${RESET}"
+    ui_print "  锁屏文字    ${DIM}\"$message\"${RESET}"
+    ui_blank
+    ui_dim "修改: zzz config <key> <value>"
+    ui_dim "可用 key: bedtime, wakeup, winddown, message"
+    ui_blank
+    return
+  fi
+
+  local key="$1" value="$2"
+
+  case "$key" in
+    bedtime)
+      if [[ ! "$value" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        ui_error "格式错误，请用 HH:MM（如 23:00）"
+        return 1
+      fi
+
+      local current
+      current=$(config_get "bedtime")
+      local cur_min new_min
+      cur_min=$(time_to_minutes "$current")
+      new_min=$(time_to_minutes "$value")
+
+      if (( new_min > cur_min )); then
+        # Pushing bedtime later — 24h cooldown
+        ui_warn "你想把睡觉时间从 $current 推迟到 $value"
+        ui_warn "推迟需要 24 小时冷静期，明天之后生效"
+        local pending_file="$ZZZ_DIR/pending_bedtime"
+        echo "$value|$(date +%s)" > "$pending_file"
+        ui_success "已记录，将在明天之后生效"
+      else
+        config_set "bedtime" "$value"
+        source "$LIB_DIR/schedule.sh"
+        schedule_update
+        ui_success "睡觉时间已更新为 $value（立即生效）"
+      fi
+      ;;
+    wakeup)
+      if [[ ! "$value" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        ui_error "格式错误，请用 HH:MM"
+        return 1
+      fi
+      config_set "wakeup" "$value"
+      ui_success "起床时间已更新为 $value"
+      ;;
+    winddown)
+      if [[ ! "$value" =~ ^[0-9]+$ ]] || (( value < 5 || value > 120 )); then
+        ui_error "请输入 5-120 之间的分钟数"
+        return 1
+      fi
+      config_set "winddown_minutes" "$value"
+      source "$LIB_DIR/schedule.sh"
+      schedule_update
+      ui_success "提前提醒时间已更新为 $value 分钟"
+      ;;
+    message)
+      if [ -z "$value" ]; then
+        ui_error "请提供锁屏文字"
+        return 1
+      fi
+      config_set "message" "$value"
+      ui_success "锁屏文字已更新"
+      ;;
+    *)
+      ui_error "未知设置: $key"
+      ui_dim "可用: bedtime, wakeup, winddown, message"
+      return 1
+      ;;
+  esac
+}
+
+cmd_tonight() {
+  local action="${1:-}"
+
+  case "$action" in
+    off)
+      if ! config_exists; then
+        ui_error "还没有配置。运行 zzz init"
+        return 1
+      fi
+
+      ui_blank
+      ui_warn "你想跳过今晚的锁定。"
+      ui_input "请输入跳过原因（会记录在案）" skip_reason ""
+
+      if [ -z "$skip_reason" ]; then
+        ui_error "需要说明原因才能跳过"
+        return 1
+      fi
+
+      local today
+      today=$(date +%Y-%m-%d)
+      echo "$today" > "$ZZZ_DIR/skip_tonight"
+      stats_record "$today" "skipped:$skip_reason"
+      ui_success "今晚已跳过（原因: $skip_reason）"
+      ui_blank
+      ;;
+    "")
+      ui_error "用法: zzz tonight off"
+      ;;
+    *)
+      ui_error "未知操作: $action"
+      ui_dim "用法: zzz tonight off"
+      ;;
+  esac
+}
+
+cmd_log() {
+  if ! config_exists; then
+    ui_error "还没有配置。运行 zzz init"
+    return 1
+  fi
+
+  stats_ensure
+
+  ui_blank
+  ui_header "历史记录"
+
+  python3 -c "
+import json
+with open('$ZZZ_STATS') as f: d = json.load(f)
+records = d.get('records', [])
+if not records:
+    print('  还没有记录')
+else:
+    for r in records[-20:]:
+        date = r['date']
+        status = r['status']
+        if status == 'completed':
+            print(f'  \033[38;5;114m✓\033[0m {date}  守约')
+        else:
+            reason = status.replace('skipped:', '')
+            print(f'  \033[38;5;222m○\033[0m {date}  跳过  \033[2m{reason}\033[0m')
+"
+  ui_blank
+}
+
+cmd_test() {
+  # Quick test: launch the overlay for 10 seconds
+  ui_step "测试锁屏覆盖层（10 秒后自动退出）..."
+
+  local overlay="$ZZZ_ROOT/bin/zzz-overlay"
+  [ ! -x "$overlay" ] && overlay="$HOME/.timetosleep/bin/zzz-overlay"
+
+  if [ ! -x "$overlay" ]; then
+    ui_error "找不到锁屏程序，请先运行 install.sh"
+    return 1
+  fi
+
+  "$overlay" &
+  local pid=$!
+  sleep 10
+  kill $pid 2>/dev/null
+  ui_success "测试完成"
+}
+
+cmd_uninstall() {
+  ui_blank
+  ui_moon
+
+  if config_exists; then
+    local summary
+    summary=$(stats_summary)
+    IFS='|' read -r total completed skipped installed <<< "$summary"
+
+    local streak
+    streak=$(stats_streak)
+
+    if (( total > 0 )); then
+      ui_box "$(printf '%b\n' \
+        "${BOLD}你的 TimeToSleep 之旅${RESET}" \
+        "" \
+        "  使用天数  ${BOLD}$total${RESET} 天" \
+        "  守约次数  ${C_GREEN}${BOLD}$completed${RESET} / $total" \
+        "  当前连续  ${BOLD}$streak${RESET} 晚")"
+      ui_blank
+    fi
+  fi
+
+  if ! ui_type_confirm "确定要卸载吗？请输入：" "我不再需要TimeToSleep"; then
+    ui_blank
+    ui_success "卸载已取消。"
+    ui_blank
+    return
+  fi
+
+  ui_blank
+  ui_step "移除定时任务..."
+  source "$LIB_DIR/schedule.sh"
+  schedule_uninstall
+
+  ui_step "清理配置文件..."
+  rm -rf "$HOME/.timetosleep"
+
+  ui_step "移除命令..."
+  rm -f /usr/local/bin/zzz 2>/dev/null || true
+
+  ui_blank
+  ui_success "已完全卸载。"
+  ui_print "  ${DIM}希望你已经养成了好习惯。晚安。${RESET}"
+  ui_blank
+}
+
+cmd_help() {
+  ui_blank
+  ui_moon
+  ui_print "  ${BOLD}用法${RESET}"
+  ui_print "  ${C_GRAY}─────────────────────────────${RESET}"
+  ui_print "  ${BOLD}zzz${RESET}              今晚状态"
+  ui_print "  ${BOLD}zzz init${RESET}         首次设置 / 重新设置"
+  ui_print "  ${BOLD}zzz status${RESET}       详细状态与统计"
+  ui_print "  ${BOLD}zzz config${RESET}       查看设置"
+  ui_print "  ${BOLD}zzz config${RESET} ${C_CYAN}<key> <value>${RESET}"
+  ui_print "                   修改设置"
+  ui_print "  ${BOLD}zzz tonight off${RESET}  跳过今晚"
+  ui_print "  ${BOLD}zzz log${RESET}          历史记录"
+  ui_print "  ${BOLD}zzz test${RESET}         测试锁屏（10 秒）"
+  ui_print "  ${BOLD}zzz uninstall${RESET}    卸载"
+  ui_print "  ${BOLD}zzz help${RESET}         显示帮助"
+  ui_blank
+}
+
+# ── Router ───────────────────────────────────────────────────────
+case "${1:-}" in
+  "")         cmd_default ;;
+  init)       cmd_init ;;
+  status)     cmd_status ;;
+  config)     shift; cmd_config "$@" ;;
+  tonight)    shift; cmd_tonight "$@" ;;
+  log)        cmd_log ;;
+  test)       cmd_test ;;
+  uninstall)  cmd_uninstall ;;
+  help|--help|-h) cmd_help ;;
+  *)
+    ui_error "未知命令: $1"
+    cmd_help
+    exit 1
+    ;;
+esac

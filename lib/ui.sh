@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+# TimeToSleep terminal UI toolkit
+
+# ── Colors & Styles ──────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+ITALIC='\033[3m'
+UNDERLINE='\033[4m'
+RESET='\033[0m'
+
+# Palette — muted, calming night tones
+C_PURPLE='\033[38;5;141m'
+C_BLUE='\033[38;5;111m'
+C_CYAN='\033[38;5;116m'
+C_GREEN='\033[38;5;114m'
+C_YELLOW='\033[38;5;222m'
+C_ORANGE='\033[38;5;216m'
+C_RED='\033[38;5;167m'
+C_GRAY='\033[38;5;245m'
+C_WHITE='\033[38;5;255m'
+C_DARK='\033[38;5;238m'
+
+# ── Basic output ─────────────────────────────────────────────────
+ui_print() { printf "%b\n" "$*"; }
+ui_print_n() { printf "%b" "$*"; }
+
+ui_blank() { echo; }
+
+ui_header() {
+  local text="$1"
+  ui_blank
+  ui_print "  ${BOLD}${C_PURPLE}$text${RESET}"
+  ui_blank
+}
+
+ui_step() {
+  local text="$1"
+  ui_print "  ${C_CYAN}›${RESET} $text"
+}
+
+ui_success() {
+  local text="$1"
+  ui_print "  ${C_GREEN}✓${RESET} $text"
+}
+
+ui_warn() {
+  local text="$1"
+  ui_print "  ${C_YELLOW}!${RESET} $text"
+}
+
+ui_error() {
+  local text="$1"
+  ui_print "  ${C_RED}✗${RESET} $text"
+}
+
+ui_dim() {
+  ui_print "  ${DIM}${C_GRAY}$1${RESET}"
+}
+
+# ── Box drawing ──────────────────────────────────────────────────
+ui_box() {
+  local -a lines=()
+  local max_len=0
+
+  while IFS= read -r line; do
+    lines+=("$line")
+    local stripped
+    stripped=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
+    local len=${#stripped}
+    (( len > max_len )) && max_len=$len
+  done <<< "$1"
+
+  local width=$(( max_len + 4 ))
+  local bar
+  bar=$(printf '─%.0s' $(seq 1 $((width - 2))))
+
+  ui_print "  ${C_DARK}╭${bar}╮${RESET}"
+  for line in "${lines[@]}"; do
+    local stripped
+    stripped=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
+    local visible_len=${#stripped}
+    local pad=$(( max_len - visible_len ))
+    local padding
+    padding=$(printf ' %.0s' $(seq 1 $pad) 2>/dev/null)
+    ui_print "  ${C_DARK}│${RESET}  ${line}${padding}  ${C_DARK}│${RESET}"
+  done
+  ui_print "  ${C_DARK}╰${bar}╯${RESET}"
+}
+
+# ── Interactive inputs ───────────────────────────────────────────
+
+# Ask for text input
+# Usage: ui_input "prompt" variable_name [default]
+ui_input() {
+  local prompt="$1" var_name="$2" default="$3"
+  local display_default=""
+  [ -n "$default" ] && display_default=" ${DIM}($default)${RESET}"
+
+  ui_blank
+  ui_print_n "  ${C_PURPLE}?${RESET} ${BOLD}$prompt${RESET}${display_default} ${C_GRAY}›${RESET} "
+  local answer
+  read -r answer
+  [ -z "$answer" ] && answer="$default"
+  eval "$var_name='$answer'"
+}
+
+# Parse flexible time input into HH:MM
+# Accepts: 23, 23:00, 2300, 23点, 23点30, 23点半, 11pm, 7:30am, etc.
+_parse_time() {
+  local raw="$1"
+  # strip whitespace
+  raw=$(echo "$raw" | tr -d ' ')
+
+  local h="" m=""
+
+  # "23:00" or "7:30"
+  if [[ "$raw" =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="${BASH_REMATCH[2]}"
+  # "2300"
+  elif [[ "$raw" =~ ^([0-9]{2})([0-9]{2})$ ]] && (( ${raw:0:2} <= 23 )); then
+    h="${raw:0:2}"; m="${raw:2:2}"
+  # "23点半" or "23点30" or "23点"
+  elif [[ "$raw" =~ ^([0-9]{1,2})(点|时)半$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="30"
+  elif [[ "$raw" =~ ^([0-9]{1,2})(点|时)([0-9]{1,2})(分)?$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="${BASH_REMATCH[3]}"
+  elif [[ "$raw" =~ ^([0-9]{1,2})(点|时)$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="0"
+  # bare number "23" or "7"
+  elif [[ "$raw" =~ ^([0-9]{1,2})$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="0"
+  # "11pm" / "7am" / "11:30pm"
+  elif [[ "$raw" =~ ^([0-9]{1,2})(:([0-9]{2}))?[[:space:]]*(am|pm|AM|PM)$ ]]; then
+    h="${BASH_REMATCH[1]}"; m="${BASH_REMATCH[3]:-0}"
+    local ampm="${BASH_REMATCH[4]}"
+    if [[ "$ampm" =~ ^[pP] ]] && (( 10#$h < 12 )); then (( h = 10#$h + 12 )); fi
+    if [[ "$ampm" =~ ^[aA] ]] && (( 10#$h == 12 )); then h=0; fi
+  else
+    echo ""; return 1
+  fi
+
+  # validate
+  if (( 10#$h >= 0 && 10#$h <= 23 && 10#$m >= 0 && 10#$m <= 59 )); then
+    printf "%02d:%02d" "$((10#$h))" "$((10#$m))"
+    return 0
+  fi
+  echo ""; return 1
+}
+
+# Ask for time input (flexible format)
+# Usage: ui_input_time "prompt" variable_name [default]
+ui_input_time() {
+  local prompt="$1" var_name="$2" default="$3"
+  while true; do
+    ui_input "$prompt" _time_val "$default"
+    local parsed
+    parsed=$(_parse_time "$_time_val")
+    if [ -n "$parsed" ]; then
+      ui_print "  ${C_GREEN}✓${RESET} ${DIM}${parsed}${RESET}"
+      eval "$var_name='$parsed'"
+      return 0
+    fi
+    ui_error "没听懂这个时间，试试这些写法：23、23:00、23点、23点半、11pm"
+  done
+}
+
+# Multi-select with checkboxes
+# Usage: ui_multiselect "prompt" result_var "label1:val1" "label2:val2" ...
+# Pre-select by appending :selected → "label:val:selected"
+ui_multiselect() {
+  local prompt="$1" var_name="$2"
+  shift 2
+  local -a labels=() values=() selected=()
+
+  for item in "$@"; do
+    local label="${item%%:*}"
+    local rest="${item#*:}"
+    local val="${rest%%:*}"
+    local sel="${rest#*:}"
+    labels+=("$label")
+    values+=("$val")
+    if [ "$sel" = "selected" ]; then
+      selected+=(1)
+    else
+      selected+=(0)
+    fi
+  done
+
+  local count=${#labels[@]}
+  local cursor=0
+
+  ui_blank
+  ui_print "  ${C_PURPLE}?${RESET} ${BOLD}$prompt${RESET}  ${DIM}(空格切换, 回车确认)${RESET}"
+
+  # save cursor position
+  tput sc 2>/dev/null
+
+  _ms_draw() {
+    tput rc 2>/dev/null
+    for (( i=0; i<count; i++ )); do
+      local check=" "
+      [ "${selected[$i]}" = "1" ] && check="${C_GREEN}✓${RESET}"
+      local pointer="  "
+      local style=""
+      if [ $i -eq $cursor ]; then
+        pointer="${C_CYAN}❯${RESET} "
+        style="${BOLD}"
+      fi
+      ui_print "  ${pointer}[${check}] ${style}${labels[$i]}${RESET}"
+    done
+  }
+
+  # initial draw
+  for (( i=0; i<count; i++ )); do echo; done
+  tput sc 2>/dev/null
+  tput cuu $count 2>/dev/null
+  tput sc 2>/dev/null
+  _ms_draw
+
+  while true; do
+    local key
+    IFS= read -rsn1 key
+    case "$key" in
+      $'\x1b')
+        read -rsn2 rest
+        case "$rest" in
+          '[A') (( cursor > 0 )) && (( cursor-- )) ;;  # up
+          '[B') (( cursor < count-1 )) && (( cursor++ )) ;;  # down
+        esac
+        ;;
+      ' ')
+        if [ "${selected[$cursor]}" = "1" ]; then
+          selected[$cursor]=0
+        else
+          selected[$cursor]=1
+        fi
+        ;;
+      '')
+        break
+        ;;
+    esac
+    _ms_draw
+  done
+
+  # collect selected values
+  local result=()
+  local display=()
+  for (( i=0; i<count; i++ )); do
+    if [ "${selected[$i]}" = "1" ]; then
+      result+=("${values[$i]}")
+      display+=("${labels[$i]}")
+    fi
+  done
+
+  eval "$var_name='$(IFS=,; echo "${result[*]}")'"
+
+  # show summary
+  local summary
+  summary=$(IFS=、; echo "${display[*]}")
+  ui_print "  ${C_GREEN}✓${RESET} ${DIM}已选：${summary}${RESET}"
+}
+
+# Single select
+# Usage: ui_select "prompt" result_var "label1:val1" "label2:val2" ...
+ui_select() {
+  local prompt="$1" var_name="$2"
+  shift 2
+  local -a labels=() values=()
+
+  for item in "$@"; do
+    labels+=("${item%%:*}")
+    values+=("${item#*:}")
+  done
+
+  local count=${#labels[@]}
+  local cursor=0
+
+  ui_blank
+  ui_print "  ${C_PURPLE}?${RESET} ${BOLD}$prompt${RESET}  ${DIM}(↑↓选择, 回车确认)${RESET}"
+
+  for (( i=0; i<count; i++ )); do echo; done
+  tput sc 2>/dev/null
+  tput cuu $count 2>/dev/null
+  tput sc 2>/dev/null
+
+  _ss_draw() {
+    tput rc 2>/dev/null
+    for (( i=0; i<count; i++ )); do
+      if [ $i -eq $cursor ]; then
+        ui_print "  ${C_CYAN}❯${RESET} ${BOLD}${labels[$i]}${RESET}"
+      else
+        ui_print "    ${DIM}${labels[$i]}${RESET}"
+      fi
+    done
+  }
+
+  _ss_draw
+
+  while true; do
+    local key
+    IFS= read -rsn1 key
+    case "$key" in
+      $'\x1b')
+        read -rsn2 rest
+        case "$rest" in
+          '[A') (( cursor > 0 )) && (( cursor-- )) ;;
+          '[B') (( cursor < count-1 )) && (( cursor++ )) ;;
+        esac
+        ;;
+      '') break ;;
+    esac
+    _ss_draw
+  done
+
+  eval "$var_name='${values[$cursor]}'"
+  ui_print "  ${C_GREEN}✓${RESET} ${DIM}已选：${labels[$cursor]}${RESET}"
+}
+
+# Confirm (y/N)
+ui_confirm() {
+  local prompt="$1" default="${2:-n}"
+  local hint="y/N"
+  [ "$default" = "y" ] && hint="Y/n"
+
+  ui_print_n "  ${C_PURPLE}?${RESET} ${BOLD}$prompt${RESET} ${DIM}($hint)${RESET} ${C_GRAY}›${RESET} "
+  local answer
+  read -rn1 answer
+  echo
+  [ -z "$answer" ] && answer="$default"
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+# Type-to-confirm: user must type exact phrase (retries up to 3 times)
+# Strips extra whitespace before comparing
+ui_type_confirm() {
+  local prompt="$1" phrase="$2"
+  local max_tries=3
+
+  for (( try=1; try<=max_tries; try++ )); do
+    ui_blank
+    if (( try == 1 )); then
+      ui_print "  ${BOLD}$prompt${RESET}"
+    else
+      ui_print "  ${C_YELLOW}再试一次（第 ${try}/${max_tries} 次）${RESET}"
+    fi
+    ui_print "  ${DIM}请输入：${RESET}${C_YELLOW}$phrase${RESET}"
+    ui_blank
+    ui_print_n "  ${C_GRAY}›${RESET} "
+    local answer
+    read -r answer
+    # normalize: collapse all whitespace
+    local norm_answer norm_phrase
+    norm_answer=$(echo "$answer" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
+    norm_phrase=$(echo "$phrase" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
+    if [ "$norm_answer" = "$norm_phrase" ]; then
+      return 0
+    fi
+    if (( try < max_tries )); then
+      ui_error "输入不匹配，请完整输入上面黄色的文字"
+    fi
+  done
+  return 1
+}
+
+# ── Progress / animation ─────────────────────────────────────────
+ui_countdown() {
+  local seconds="$1" msg="$2"
+  for (( i=seconds; i>0; i-- )); do
+    printf "\r  ${C_YELLOW}%s${RESET} %d..." "$msg" "$i"
+    sleep 1
+  done
+  printf "\r  ${C_GREEN}✓${RESET} %-40s\n" "$msg"
+}
+
+# Moon ASCII art
+ui_moon() {
+  ui_print "${C_PURPLE}"
+  ui_print "        🌙"
+  ui_print ""
+  ui_print "    ${BOLD}T i m e T o S l e e p${RESET}"
+  ui_print ""
+}

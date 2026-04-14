@@ -162,26 +162,10 @@ cmd_config() {
         ui_error "格式错误，请用 HH:MM（如 23:00）"
         return 1
       fi
-
-      local current
-      current=$(config_get "bedtime")
-      local cur_min new_min
-      cur_min=$(time_to_minutes "$current")
-      new_min=$(time_to_minutes "$value")
-
-      if (( new_min > cur_min )); then
-        # Pushing bedtime later — 24h cooldown
-        ui_warn "你想把睡觉时间从 $current 推迟到 $value"
-        ui_warn "推迟需要 24 小时冷静期，明天之后生效"
-        local pending_file="$ZZZ_DIR/pending_bedtime"
-        echo "$value|$(date +%s)" > "$pending_file"
-        ui_success "已记录，将在明天之后生效"
-      else
-        config_set "bedtime" "$value"
-        source "$LIB_DIR/schedule.sh"
-        schedule_update
-        ui_success "睡觉时间已更新为 $value（立即生效）"
-      fi
+      config_set "bedtime" "$value"
+      source "$LIB_DIR/schedule.sh"
+      schedule_update
+      ui_success "睡觉时间已更新为 $value"
       ;;
     wakeup)
       if [[ ! "$value" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then

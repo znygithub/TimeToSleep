@@ -1,5 +1,11 @@
 # TimeToSleep
 
+> Nothing is more important than sleep.
+>
+> Sleeping early is the foundation of good rest, yet most people stay up late because they can't put down their computer. But asking someone to willingly walk away from a screen — that's fighting human nature. So flip the script: when it's time, the computer locks itself.
+>
+> No willpower required. No "just five more minutes." Time's up, screen goes dark, day's over. That's working *with* human nature, not against it.
+
 A terminal-based commitment device that locks your Mac at bedtime. You sign a contract with yourself — the computer enforces it.
 
 [中文](README.md)
@@ -34,18 +40,16 @@ Interactive onboarding: set bedtime, wake-up time, active days, and write a mess
 ```
 zzz              # Tonight's status + countdown
 zzz status       # Detailed stats
-zzz config       # View settings
-zzz config bedtime 22:30   # Change bedtime (earlier = instant, later = 24h cooldown)
+zzz config       # View / change settings
 zzz tonight off  # Skip tonight (must give a reason)
 zzz log          # History
 zzz test         # Test the lock screen for 10 seconds
 zzz uninstall    # Remove everything
 ```
 
-## Design philosophy
+## Design principles
 
-- **Making bedtime earlier is instant. Pushing it later requires a 24-hour cooling period.** Prevents impulsive late-night config changes.
-- **Lockdown is absolute.** No exit until wake-up time. The only way out is rebooting — which is enough friction to stop casual browsing urges.
+- **Lockdown is absolute.** No exit until wake-up time. The only way out is rebooting — which is enough friction to stop most late-night impulses.
 - **Uninstall is clean but reflective.** Shows your streak and stats before confirming. No guilt-tripping — just a moment to see what you've built.
 
 ## How it works

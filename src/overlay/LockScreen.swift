@@ -92,7 +92,7 @@ struct SleepStats {
             if status == "completed" {
                 streak += 1
                 day = cal.date(byAdding: .day, value: -1, to: day)!
-            } else if status.hasPrefix("skipped") {
+            } else if status.hasPrefix("skipped") || status.isEmpty {
                 day = cal.date(byAdding: .day, value: -1, to: day)!
                 continue
             } else {
@@ -206,19 +206,33 @@ class LockScreenView: NSView {
     private func setupUI() {
         wantsLayer = true
 
-        let gradient = CAGradientLayer()
-        gradient.frame = bounds
-        gradient.colors = [
-            NSColor(red: 0.06, green: 0.06, blue: 0.12, alpha: 1.0).cgColor,
-            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1.0).cgColor
+        // Background: #141425 → #0a0a12
+        let bg = CAGradientLayer()
+        bg.frame = bounds
+        bg.colors = [
+            NSColor(red: 0.078, green: 0.078, blue: 0.145, alpha: 1.0).cgColor,
+            NSColor(red: 0.039, green: 0.039, blue: 0.071, alpha: 1.0).cgColor
         ]
-        gradient.startPoint = CGPoint(x: 0.5, y: 1.0)
-        gradient.endPoint = CGPoint(x: 0.5, y: 0.0)
-        layer?.addSublayer(gradient)
+        bg.startPoint = CGPoint(x: 0.5, y: 1.0)
+        bg.endPoint = CGPoint(x: 0.5, y: 0.0)
+        layer?.addSublayer(bg)
+
+        // Subtle top glow
+        let glow = CAGradientLayer()
+        glow.frame = NSRect(x: -bounds.width * 0.1, y: bounds.height * 0.4,
+                            width: bounds.width * 1.2, height: bounds.height * 0.6)
+        glow.type = .radial
+        glow.colors = [
+            NSColor(red: 0.39, green: 0.39, blue: 0.71, alpha: 0.03).cgColor,
+            NSColor.clear.cgColor
+        ]
+        glow.startPoint = CGPoint(x: 0.5, y: 1.0)
+        glow.endPoint = CGPoint(x: 0.5, y: 0.0)
+        layer?.addSublayer(glow)
 
         // ── Center content ──
 
-        let containerHeight: CGFloat = 320
+        let containerHeight: CGFloat = 360
         let container = NSView(frame: NSRect(
             x: bounds.midX - 300, y: bounds.midY - containerHeight / 2 + 30,
             width: 600, height: containerHeight
@@ -228,15 +242,29 @@ class LockScreenView: NSView {
 
         var y: CGFloat = containerHeight
 
-        // Time
-        y -= 100
-        timeLabel = makeLabel(text: currentTimeString(), fontSize: 80, color: .white,
-                              frame: NSRect(x: 0, y: y, width: 600, height: 100))
-        timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 80, weight: .thin)
+        // ── Time: weight 300, 96px, rgba(255,255,255,0.88), letter-spacing 4px ──
+        y -= 110
+        timeLabel = NSTextField(frame: NSRect(x: 0, y: y, width: 600, height: 110))
+        timeLabel.isBordered = false
+        timeLabel.isEditable = false
+        timeLabel.isSelectable = false
+        timeLabel.backgroundColor = .clear
+        timeLabel.alignment = .center
+        let timePS = NSMutableParagraphStyle()
+        timePS.alignment = .center
+        timeLabel.attributedStringValue = NSAttributedString(
+            string: currentTimeString(),
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 96, weight: .light),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.88),
+                .kern: 4.0,
+                .paragraphStyle: timePS
+            ]
+        )
         container.addSubview(timeLabel)
 
-        // Streak or total
-        y -= 36
+        // ── Streak: 16px, rgba(255,255,255,0.45), letter-spacing 1px ──
+        y -= 48
         let statText: String
         if stats.streak > 0 {
             statText = "🔥 连续早睡第 \(stats.streak) 天"
@@ -245,31 +273,95 @@ class LockScreenView: NSView {
         } else {
             statText = "今晚是新的开始"
         }
-        container.addSubview(makeLabel(
-            text: statText, fontSize: 14,
-            color: NSColor(white: 0.5, alpha: 1.0),
-            frame: NSRect(x: 0, y: y, width: 600, height: 22)
-        ))
-
-        // Quote
-        y -= 70
-        let quoteLabel = makeLabel(
-            text: "「\(todayQuote())」",
-            fontSize: 18,
-            color: NSColor(white: 0.55, alpha: 1.0),
-            frame: NSRect(x: 40, y: y, width: 520, height: 60)
+        let statLabel = NSTextField(frame: NSRect(x: 0, y: y, width: 600, height: 24))
+        statLabel.isBordered = false
+        statLabel.isEditable = false
+        statLabel.isSelectable = false
+        statLabel.backgroundColor = .clear
+        statLabel.alignment = .center
+        let statPS = NSMutableParagraphStyle()
+        statPS.alignment = .center
+        statLabel.attributedStringValue = NSAttributedString(
+            string: statText,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 16, weight: .regular),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.45),
+                .kern: 1.0,
+                .paragraphStyle: statPS
+            ]
         )
-        quoteLabel.font = NSFont.systemFont(ofSize: 18, weight: .regular)
+        container.addSubview(statLabel)
+
+        // ── Quote: serif font, 26px, rgba(255,255,255,0.85), line-height 1.9, letter-spacing 2px ──
+        // Brackets 「」 in rgba(255,255,255,0.25)
+        y -= 44
+        y -= 100
+        let serifFont = NSFont(name: "Songti SC", size: 26)
+            ?? NSFont(name: "STSongti-SC-Regular", size: 26)
+            ?? NSFont.systemFont(ofSize: 26, weight: .regular)
+
+        let quotePS = NSMutableParagraphStyle()
+        quotePS.alignment = .center
+        quotePS.lineHeightMultiple = 1.9
+
+        let bracketAttrs: [NSAttributedString.Key: Any] = [
+            .font: serifFont,
+            .foregroundColor: NSColor(white: 1.0, alpha: 0.25),
+            .kern: 2.0,
+            .paragraphStyle: quotePS
+        ]
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: serifFont,
+            .foregroundColor: NSColor(white: 1.0, alpha: 0.85),
+            .kern: 2.0,
+            .paragraphStyle: quotePS
+        ]
+
+        let quoteStr = NSMutableAttributedString()
+        quoteStr.append(NSAttributedString(string: "「", attributes: bracketAttrs))
+        quoteStr.append(NSAttributedString(string: todayQuote(), attributes: textAttrs))
+        quoteStr.append(NSAttributedString(string: "」", attributes: bracketAttrs))
+
+        let quoteLabel = NSTextField(frame: NSRect(x: 60, y: y, width: 480, height: 100))
+        quoteLabel.isBordered = false
+        quoteLabel.isEditable = false
+        quoteLabel.isSelectable = false
+        quoteLabel.backgroundColor = .clear
+        quoteLabel.alignment = .center
+        quoteLabel.lineBreakMode = .byWordWrapping
         quoteLabel.maximumNumberOfLines = 3
+        quoteLabel.attributedStringValue = quoteStr
+        quoteLabel.wantsLayer = true
         container.addSubview(quoteLabel)
 
-        // ── Bottom: wake time ──
+        // Subtle breathing on quote
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 1.0
+        breathe.toValue = 0.82
+        breathe.duration = 3.0
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        quoteLabel.layer?.add(breathe, forKey: "breathe")
 
-        let bottomLabel = makeLabel(
-            text: "明早 \(config.wakeupTime) 自动解锁",
-            fontSize: 13,
-            color: NSColor(white: 0.25, alpha: 1.0),
-            frame: NSRect(x: 0, y: 40, width: bounds.width, height: 20)
+        // ── Bottom: "明早 07:00 解锁" ──
+
+        let bottomLabel = NSTextField(frame: NSRect(x: 0, y: 56, width: bounds.width, height: 20))
+        bottomLabel.isBordered = false
+        bottomLabel.isEditable = false
+        bottomLabel.isSelectable = false
+        bottomLabel.backgroundColor = .clear
+        bottomLabel.alignment = .center
+        let bottomPS = NSMutableParagraphStyle()
+        bottomPS.alignment = .center
+        bottomLabel.attributedStringValue = NSAttributedString(
+            string: "明早 \(config.wakeupTime) 解锁",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.2),
+                .kern: 1.0,
+                .paragraphStyle: bottomPS
+            ]
         )
         bottomLabel.autoresizingMask = [.width, .minYMargin]
         addSubview(bottomLabel)
@@ -289,7 +381,19 @@ class LockScreenView: NSView {
         return label
     }
 
-    func updateTime() { timeLabel?.stringValue = currentTimeString() }
+    func updateTime() {
+        let ps = NSMutableParagraphStyle()
+        ps.alignment = .center
+        timeLabel?.attributedStringValue = NSAttributedString(
+            string: currentTimeString(),
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 96, weight: .light),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.88),
+                .kern: 4.0,
+                .paragraphStyle: ps
+            ]
+        )
+    }
 
     private func currentTimeString() -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm"

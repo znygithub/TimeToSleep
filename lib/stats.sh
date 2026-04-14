@@ -61,7 +61,7 @@ while safety < 400:
     if status == 'completed':
         streak += 1
         day -= timedelta(days=1)
-    elif status.startswith('skipped'):
+    elif status.startswith('skipped') or status == '':
         day -= timedelta(days=1)
         continue
     else:

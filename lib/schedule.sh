@@ -5,13 +5,15 @@ SCRIPT_DIR_SCHED="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR_SCHED/config.sh"
 
 AGENT_LABEL="com.timetosleep.daemon"
+BOOTCHECK_LABEL="com.timetosleep.bootcheck"
 PLIST_PATH="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
+BOOTCHECK_PLIST="$HOME/Library/LaunchAgents/${BOOTCHECK_LABEL}.plist"
 
-# Find the daemon script path (installed location)
-_daemon_path() {
-  local installed="$HOME/.timetosleep/bin/zzz-daemon"
-  local dev="$(cd "$SCRIPT_DIR_SCHED/../src" && pwd)/daemon.sh"
-  if [ -x "$installed" ]; then
+_script_path() {
+  local name="$1"
+  local installed="$HOME/.timetosleep/src/${name}"
+  local dev="$(cd "$SCRIPT_DIR_SCHED/../src" && pwd)/${name}"
+  if [ -f "$installed" ]; then
     echo "$installed"
   else
     echo "$dev"
@@ -33,19 +35,20 @@ _winddown_start() {
 }
 
 schedule_install() {
-  local daemon_path
-  daemon_path=$(_daemon_path)
+  local daemon_path bootcheck_path
+  daemon_path=$(_script_path "daemon.sh")
+  bootcheck_path=$(_script_path "bootcheck.sh")
   local start_time
   start_time=$(_winddown_start)
   local hour="${start_time%%:*}"
   local minute="${start_time##*:}"
 
-  # Remove leading zeros for plist (launchd wants integers)
   hour=$((10#$hour))
   minute=$((10#$minute))
 
   mkdir -p "$(dirname "$PLIST_PATH")"
 
+  # ── Nightly daemon: triggers at winddown time ──
   cat > "$PLIST_PATH" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -84,16 +87,54 @@ schedule_install() {
 </plist>
 PLIST
 
-  # load the agent
+  # ── Boot check: runs at login, re-locks if in lockdown window ──
+  cat > "$BOOTCHECK_PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${BOOTCHECK_LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${bootcheck_path}</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>${ZZZ_DIR}/daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>${ZZZ_DIR}/daemon.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>${HOME}</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+
+  # Load both agents
   launchctl unload "$PLIST_PATH" 2>/dev/null
   launchctl load "$PLIST_PATH" 2>/dev/null
+  launchctl unload "$BOOTCHECK_PLIST" 2>/dev/null
+  launchctl load "$BOOTCHECK_PLIST" 2>/dev/null
 }
 
 schedule_uninstall() {
-  if [ -f "$PLIST_PATH" ]; then
-    launchctl unload "$PLIST_PATH" 2>/dev/null
-    rm -f "$PLIST_PATH"
-  fi
+  for p in "$PLIST_PATH" "$BOOTCHECK_PLIST"; do
+    if [ -f "$p" ]; then
+      launchctl unload "$p" 2>/dev/null
+      rm -f "$p"
+    fi
+  done
 }
 
 schedule_is_installed() {

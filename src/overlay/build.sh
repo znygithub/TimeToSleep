@@ -5,13 +5,25 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT="${1:-$SCRIPT_DIR/../../bin/zzz-overlay}"
 
-echo "Compiling LockScreen overlay..."
-swiftc \
-  -O \
-  -o "$OUTPUT" \
-  -framework Cocoa \
-  -framework CoreGraphics \
+echo "Compiling LockScreen overlay (universal: arm64 + x86_64)..."
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+swiftc -O -target arm64-apple-macos11 \
+  -o "$TMP_DIR/zzz-overlay.arm64" \
+  -framework Cocoa -framework CoreGraphics \
   "$SCRIPT_DIR/LockScreen.swift"
+
+swiftc -O -target x86_64-apple-macos11 \
+  -o "$TMP_DIR/zzz-overlay.x86_64" \
+  -framework Cocoa -framework CoreGraphics \
+  "$SCRIPT_DIR/LockScreen.swift"
+
+lipo -create -output "$OUTPUT" \
+  "$TMP_DIR/zzz-overlay.arm64" \
+  "$TMP_DIR/zzz-overlay.x86_64"
 
 chmod +x "$OUTPUT"
 echo "Built: $OUTPUT"
+lipo -info "$OUTPUT"

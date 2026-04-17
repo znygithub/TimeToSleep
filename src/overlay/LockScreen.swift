@@ -169,8 +169,29 @@ class LockWindowController {
     }
 
     private func checkWakeTime() {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        if f.string(from: Date()) == config.wakeupTime { exit(0) }
+        // 用"是否已经越过起床时间"来判断，而不是精确匹配 HH:mm 字符串。
+        // 否则若 Mac 在 07:00 那一分钟处于睡眠，Timer 不跑，醒来后永远匹配不上，overlay 再也不退出。
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: Date())
+        let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        let wakeMin = Self.parseHHMM(config.wakeupTime) ?? 420   // 07:00
+        let bedMin  = Self.parseHHMM(config.bedtime)   ?? 1380   // 23:00
+
+        let inAwakeWindow: Bool
+        if bedMin > wakeMin {
+            // 正常场景：bed=23:00, wake=07:00。白天窗口 = [wake, bed)
+            inAwakeWindow = nowMin >= wakeMin && nowMin < bedMin
+        } else {
+            // 边界场景：bed=01:00, wake=08:00。锁定窗口 = [bed, wake)，白天窗口是它的补集
+            inAwakeWindow = !(nowMin >= bedMin && nowMin < wakeMin)
+        }
+        if inAwakeWindow { exit(0) }
+    }
+
+    private static func parseHHMM(_ s: String) -> Int? {
+        let parts = s.split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
+        return h * 60 + m
     }
 
     private func setupKeepAlive() {

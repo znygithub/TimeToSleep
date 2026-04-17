@@ -24,7 +24,33 @@ read -e -r -p "$prompt" answer
 
 **解法：** `parsed=$(_parse_time "$input") || true`
 
-## 4. install.sh 结束后用户不知道下一步
+## 4. 锁屏靠字符串匹配起床时间，Mac 睡眠一觉就永远解不开
+
+`LockScreen.swift` 里最早的 `checkWakeTime()` 用 `DateFormatter("HH:mm")` 把当前时间转成字符串，跟 `config.wakeupTime` 精确比对，匹配上才 `exit(0)`。
+
+问题是 Timer 只在进程实际运行时才跑。Mac 深度睡眠时 Timer 全部挂起——如果 07:00 那整整一分钟 Mac 都在睡，醒来时钟已经过了 07:00，字符串再也不可能等于 "07:00"，overlay 就**永远不退出**。daemon.sh 外层是 `wait $OVERLAY_PID`，连带整条唤醒流水线一起卡死。
+
+日志表现：当晚的 `Launching overlay` 之后，第二天早上**没有** `Wake time reached` 这行。用户一打开电脑就是黑屏锁死。
+
+**解法：** 判断"是否已经进入白天窗口"而不是精确匹配时分。和 `bootcheck.sh` 用同一套逻辑（支持跨午夜），哪怕 Timer 错过 07:00 的整个窗口，醒来后第一次采样就能退出：
+
+```swift
+let inAwakeWindow: Bool
+if bedMin > wakeMin {
+    inAwakeWindow = nowMin >= wakeMin && nowMin < bedMin
+} else {
+    inAwakeWindow = !(nowMin >= bedMin && nowMin < wakeMin)
+}
+if inAwakeWindow { exit(0) }
+```
+
+## 5. build.sh 只出本机架构，装到别的机器上跑不起来
+
+原来 `src/overlay/build.sh` 直接 `swiftc -o` 一次，在 Apple Silicon 上就只出 arm64，而仓库承诺的是 universal 二进制（`ARCHITECTURE.md` 里"预编译通用二进制 arm64 + x86_64"）。Intel Mac 拿到的话直接跑不起来。
+
+**解法：** 分别用 `-target arm64-apple-macos11` / `-target x86_64-apple-macos11` 编出两份，再 `lipo -create` 合成 fat binary。
+
+## 6. install.sh 结束后用户不知道下一步
 
 装完只打印"请运行 `zzz init`"，用户（或 AI）跑完安装脚本后什么也没弹出来，不知道接下来该干嘛。
 
@@ -38,3 +64,4 @@ tell application \"Terminal\"
 end tell
 "
 ```
+

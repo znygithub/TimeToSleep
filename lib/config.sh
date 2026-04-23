@@ -23,9 +23,16 @@ config_get() {
   if _has_jq; then
     jq -r ".$key // empty" "$ZZZ_CONFIG" 2>/dev/null
   else
-    # fallback: crude grep (works for flat string values)
-    grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$ZZZ_CONFIG" \
-      | head -1 | sed 's/.*: *"\(.*\)"/\1/'
+    # fallback: flat string values, or bare numbers (e.g. winddown_minutes)
+    local val
+    val=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$ZZZ_CONFIG" 2>/dev/null \
+      | head -1 | sed 's/.*: *"\(.*\)"/\1/')
+    if [ -n "$val" ]; then
+      echo "$val"
+    else
+      grep -o "\"$key\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" "$ZZZ_CONFIG" 2>/dev/null \
+        | head -1 | sed 's/.*:[[:space:]]*//'
+    fi
   fi
 }
 

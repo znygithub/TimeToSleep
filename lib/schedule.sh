@@ -9,6 +9,11 @@ BOOTCHECK_LABEL="com.timetosleep.bootcheck"
 PLIST_PATH="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 BOOTCHECK_PLIST="$HOME/Library/LaunchAgents/${BOOTCHECK_LABEL}.plist"
 
+# launchctl load/unload are unreliable on recent macOS; use bootstrap / bootout (user GUI domain)
+_launchd_gui() {
+  echo "gui/$(id -u)"
+}
+
 _script_path() {
   local name="$1"
   local installed="$HOME/.timetosleep/src/${name}"
@@ -26,6 +31,9 @@ _winddown_start() {
   bedtime=$(config_get "bedtime")
   local winddown
   winddown=$(config_get "winddown_minutes")
+  if ! [[ "${winddown:-}" =~ ^[0-9]+$ ]] || (( winddown < 1 )); then
+    winddown=30
+  fi
   local bed_min
   bed_min=$(time_to_minutes "$bedtime")
   local start_min=$(( bed_min - winddown ))
@@ -121,19 +129,22 @@ PLIST
 </plist>
 PLIST
 
-  # Load both agents
-  launchctl unload "$PLIST_PATH" 2>/dev/null
-  launchctl load "$PLIST_PATH" 2>/dev/null
-  launchctl unload "$BOOTCHECK_PLIST" 2>/dev/null
-  launchctl load "$BOOTCHECK_PLIST" 2>/dev/null
+  # (Re)load both agents
+  local gui
+  gui=$(_launchd_gui)
+  launchctl bootout "$gui/$AGENT_LABEL" 2>/dev/null
+  launchctl bootout "$gui/$BOOTCHECK_LABEL" 2>/dev/null
+  launchctl bootstrap "$gui" "$PLIST_PATH"
+  launchctl bootstrap "$gui" "$BOOTCHECK_PLIST"
 }
 
 schedule_uninstall() {
+  local gui
+  gui=$(_launchd_gui)
+  launchctl bootout "$gui/$AGENT_LABEL" 2>/dev/null
+  launchctl bootout "$gui/$BOOTCHECK_LABEL" 2>/dev/null
   for p in "$PLIST_PATH" "$BOOTCHECK_PLIST"; do
-    if [ -f "$p" ]; then
-      launchctl unload "$p" 2>/dev/null
-      rm -f "$p"
-    fi
+    [ -f "$p" ] && rm -f "$p"
   done
 }
 

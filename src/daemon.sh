@@ -23,6 +23,12 @@ if [ -z "$BEDTIME" ] || [ -z "$WAKEUP" ]; then
   exit 1
 fi
 
+# winddown must be numeric (default 30 if missing / bad config)
+if ! [[ "${WINDDOWN:-}" =~ ^[0-9]+$ ]] || (( WINDDOWN < 1 )); then
+  log "WARNING: winddown_minutes invalid or empty (${WINDDOWN:-}), using 30"
+  WINDDOWN=30
+fi
+
 # ── Check if today is an active day ──────────────────────────────
 if ! is_active_today; then
   log "Today is not an active day, exiting."
@@ -49,10 +55,19 @@ log "Starting wind-down sequence. Bedtime: $BEDTIME, Wake: $WAKEUP, Winddown: ${
 OVERLAY_BIN="$HOME/.timetosleep/bin/zzz-overlay"
 [ ! -x "$OVERLAY_BIN" ] && OVERLAY_BIN="$ROOT_DIR/bin/zzz-overlay"
 
-# ── Helper: send macOS notification ──────────────────────────────
+# ── Helper: send macOS notification (argv avoids quoting bugs with CJK / emoji) ──
 notify() {
-  local title="$1" body="$2"
-  osascript -e "display notification \"$body\" with title \"$title\" sound name \"default\"" 2>/dev/null
+  local title="$1" body="$2" err
+  err=$(
+    osascript -l AppleScript - -- "$title" "$body" <<'APPLESCRIPT' 2>&1
+on run argv
+  display notification (item 2 of argv) with title (item 1 of argv) sound name "default"
+end run
+APPLESCRIPT
+  )
+  if [ -n "$err" ]; then
+    log "notify osascript: $err"
+  fi
 }
 
 # ── Helper: minutes until a given time (handles midnight wrap) ───
@@ -85,8 +100,8 @@ wind_down() {
   brightness_save
   media_save_volume
 
-  # Notification at start
-  notify "TimeToSleep" "还有 ${total_min} 分钟就要锁定了，准备休息吧"
+  # First reminder: wind-down start (= “提前 N 分钟”，常见为 30 分钟)
+  notify "TimeToSleep" "睡前提醒：还有 ${total_min} 分钟就要锁定了，准备休息吧"
 
   # Progressive dimming and reminders
   local bed_min
@@ -111,8 +126,18 @@ wind_down() {
   media_fade_volume 50 &
   brightness_fade_to 0.3 10 &
 
-  # Stage 3: final stretch — wait until exact bedtime
-  sleep_until "$BEDTIME"
+  # Stage 3: sleep until 1 minute before bedtime, final ping, then lock time
+  local m
+  m=$(minutes_until "$BEDTIME")
+  if (( m > 1 )); then
+    log "Wind-down final: sleeping $((m - 1)) minutes until 1-minute reminder"
+    sleep $(( (m - 1) * 60 ))
+  fi
+  m=$(minutes_until "$BEDTIME")
+  if (( m >= 1 )); then
+    notify "TimeToSleep" "还有 1 分钟就要锁定了，请尽快收尾"
+    sleep_until "$BEDTIME"
+  fi
 }
 
 # ── PHASE 2: Lockdown ───────────────────────────────────────────

@@ -143,6 +143,11 @@ struct SleepStats {
 
 // MARK: - Lock Window Controller
 
+class LockWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 class LockWindowController {
     let config: SleepConfig
     let stats: SleepStats
@@ -166,7 +171,7 @@ class LockWindowController {
     }
 
     private func createLockWindow(for screen: NSScreen) -> NSWindow {
-        let window = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+        let window = LockWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         window.isOpaque = true
         window.backgroundColor = .black
@@ -180,6 +185,7 @@ class LockWindowController {
         let localFrame = NSRect(origin: .zero, size: screen.frame.size)
         window.contentView = LockScreenView(frame: localFrame, config: config, stats: stats)
         window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(window.contentView)
         return window
     }
 
@@ -244,6 +250,16 @@ class LockScreenView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            EmergencyExitCoordinator.shared.handleEscapeKey()
+            return
+        }
+        super.keyDown(with: event)
+    }
 
     private func setupUI() {
         wantsLayer = true
@@ -465,29 +481,12 @@ class LockScreenView: NSView {
 
 // MARK: - App Delegate
 
-class LockAppDelegate: NSObject, NSApplicationDelegate {
-    var controller: LockWindowController?
+class EmergencyExitCoordinator {
+    static let shared = EmergencyExitCoordinator()
     private var lastEscapeAt: Date = .distantPast
     private let escapeDoubleInterval: TimeInterval = 0.45
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        let config = SleepConfig.load()
-        let stats = SleepStats.load(config: config)
-        controller = LockWindowController(config: config, stats: stats)
-        controller?.activate()
-        NSApp.setActivationPolicy(.prohibited)
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self else { return nil }
-            // 53 = Escape — 双击：重新读盘 config + 当前时间，仅非锁机时段（或今日非契约日）可退出
-            if event.keyCode == 53 {
-                self.handleEscapeDoubleTap()
-            }
-            return nil
-        }
-        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { _ in nil }
-    }
-
-    private func handleEscapeDoubleTap() {
+    func handleEscapeKey() {
         let now = Date()
         if now.timeIntervalSince(lastEscapeAt) > escapeDoubleInterval {
             lastEscapeAt = now
@@ -498,6 +497,27 @@ class LockAppDelegate: NSObject, NSApplicationDelegate {
         if LockWindowMath.canEmergencyExit(config: fresh, now: Date()) {
             exit(0)
         }
+    }
+}
+
+class LockAppDelegate: NSObject, NSApplicationDelegate {
+    var controller: LockWindowController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        let config = SleepConfig.load()
+        let stats = SleepStats.load(config: config)
+        controller = LockWindowController(config: config, stats: stats)
+        controller?.activate()
+        NSApp.activate(ignoringOtherApps: true)
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 53 = Escape — 双击：重新读盘 config + 当前时间，仅非锁机时段（或今日非契约日）可退出
+            if event.keyCode == 53 {
+                EmergencyExitCoordinator.shared.handleEscapeKey()
+            }
+            return nil
+        }
+        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { _ in nil }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { .terminateCancel }

@@ -65,3 +65,13 @@ end tell
 "
 ```
 
+## 7. 合盖休眠让 `sleep` 失真 + `wind_down` 误用弯引号
+
+**现象①** 设定 23:00 睡、07:00 起，却在非锁机时段（如 21:00）被锁，或唤醒后锁在奇怪的时间。合盖后 `sleep N` 随进程挂起，唤醒后剩下的 `sleep` 仍按「冻结前」的剩余秒数跑完，墙钟与阶段时间错位。
+
+**解法①** `sleep_until` 改为短间隔轮询并每次用 `minutes_until` 看墙钟；`wind_down` 用阶段绝对时刻；若醒在「起床～风睡前」白天区则 `_overslept` 中止、不锁。见 `src/daemon.sh` 与 `tests/test-overslept-detection.sh`。
+
+**现象②** `wind_down` 里部分字符串用了 Unicode 弯引号（U+201C/U+201D），bash 不认，`bash -n` 报错，该段逻辑无法执行。
+
+**解法②** 全部改为 ASCII `"`。`tests/test-lockdown-window-and-syntax.sh` 里用 `bash -n` + 23:00～07:00 锁窗（含 21:00 不应锁）做回归。
+

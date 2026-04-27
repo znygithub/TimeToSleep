@@ -122,17 +122,17 @@ sleep_until() {
 # so Mac sleep/wake cannot break the timing.
 wind_down() {
   local total_min=$WINDDOWN
-  log “Wind-down phase starting ($total_min minutes until lockdown)”
+  log "Wind-down phase starting ($total_min minutes until lockdown)"
 
   # Save current state for later restore
   brightness_save
   media_save_volume
 
-  # First reminder: wind-down start (= “提前 N 分钟”，常见为 30 分钟)
-  notify “TimeToSleep” “睡前提醒：还有 ${total_min} 分钟就要锁定了，准备休息吧”
+  # First reminder: wind-down start (= "提前 N 分钟"，常见为 30 分钟)
+  notify "TimeToSleep" "睡前提醒：还有 ${total_min} 分钟就要锁定了，准备休息吧"
 
   local bed_min
-  bed_min=$(time_to_minutes “$BEDTIME”)
+  bed_min=$(time_to_minutes "$BEDTIME")
 
   # Wall-clock targets for each stage
   local stage2_at=$(( bed_min - total_min * 2 / 3 ))
@@ -143,47 +143,47 @@ wind_down() {
   (( warn_at < 0 )) && (( warn_at += 1440 ))
 
   # Stage 1 → wait until stage 2 wall-clock time
-  sleep_until “$(minutes_to_time $stage2_at)”
+  sleep_until "$(minutes_to_time $stage2_at)"
   if _overslept; then
-    log “Mac woke after bedtime window; aborting wind-down.”
+    log "Mac woke after bedtime window; aborting wind-down."
     brightness_restore; media_restore_volume; return 1
   fi
 
   local remaining
-  remaining=$(minutes_until “$BEDTIME”)
-  log “Wind-down stage 2: $remaining minutes remaining”
-  notify “TimeToSleep” “还有 ${remaining} 分钟锁定，保存你的工作”
+  remaining=$(minutes_until "$BEDTIME")
+  log "Wind-down stage 2: $remaining minutes remaining"
+  notify "TimeToSleep" "还有 ${remaining} 分钟锁定，保存你的工作"
   brightness_fade_to 0.6 10 &
 
   # Stage 2 → wait until stage 3 wall-clock time
-  sleep_until “$(minutes_to_time $stage3_at)”
+  sleep_until "$(minutes_to_time $stage3_at)"
   if _overslept; then
-    log “Mac woke after bedtime window; aborting wind-down.”
+    log "Mac woke after bedtime window; aborting wind-down."
     brightness_restore; media_restore_volume; return 1
   fi
 
-  remaining=$(minutes_until “$BEDTIME”)
-  log “Wind-down stage 3: $remaining minutes remaining”
-  notify “TimeToSleep” “⚠️ ${remaining} 分钟后锁定！”
+  remaining=$(minutes_until "$BEDTIME")
+  log "Wind-down stage 3: $remaining minutes remaining"
+  notify "TimeToSleep" "⚠️ ${remaining} 分钟后锁定！"
   media_fade_volume 50 &
   brightness_fade_to 0.3 10 &
 
   # 1-minute warning before bedtime
   local m
-  m=$(minutes_until “$BEDTIME”)
+  m=$(minutes_until "$BEDTIME")
   if (( m > 1 && m < 720 )); then
-    sleep_until “$(minutes_to_time $warn_at)”
+    sleep_until "$(minutes_to_time $warn_at)"
     if _overslept; then
-      log “Mac woke after bedtime window; aborting wind-down.”
+      log "Mac woke after bedtime window; aborting wind-down."
       brightness_restore; media_restore_volume; return 1
     fi
-    notify “TimeToSleep” “还有 1 分钟就要锁定了，请尽快收尾”
+    notify "TimeToSleep" "还有 1 分钟就要锁定了，请尽快收尾"
   fi
 
   # Final wait until exact bedtime
-  sleep_until “$BEDTIME”
+  sleep_until "$BEDTIME"
   if _overslept; then
-    log “Mac woke after bedtime window; aborting wind-down.”
+    log "Mac woke after bedtime window; aborting wind-down."
     brightness_restore; media_restore_volume; return 1
   fi
   return 0

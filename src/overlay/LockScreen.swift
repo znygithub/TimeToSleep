@@ -148,6 +148,8 @@ class LockWindowController {
     let stats: SleepStats
     var windows: [NSWindow] = []
     var clockTimer: Timer?
+    /// 上一秒是否在锁机窗内。仅当「刚还在锁机窗 → 现在已出窗」时自动退出，避免白天手动打开 layer 时立刻被秒关。
+    private var previousInLockdown: Bool?
 
     init(config: SleepConfig, stats: SleepStats) {
         self.config = config
@@ -207,8 +209,10 @@ class LockWindowController {
 
     private func checkWakeTime() {
         // 用"是否已经越过起床时间"来判断，而不是精确匹配 HH:mm 字符串。
-        // 否则若 Mac 在 07:00 那一分钟处于睡眠，Timer 不跑，醒来后永远匹配不上，overlay 再也不退出。
-        if !LockWindowMath.isInLockdownWindow(config: config, now: Date()) { exit(0) }
+        // 仅当**刚才还在锁机窗、这一秒已出窗**时退出（到点解锁）。若一启动就不在锁机窗（例如白天手测 open），不自动退出，否则易误以为「点一下屏就没了」。
+        let inLock = LockWindowMath.isInLockdownWindow(config: config, now: Date())
+        if let was = previousInLockdown, was, !inLock { exit(0) }
+        previousInLockdown = inLock
     }
 
     private func setupKeepAlive() {

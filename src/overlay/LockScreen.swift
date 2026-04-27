@@ -49,6 +49,43 @@ struct SleepConfig {
     }
 }
 
+// MARK: - Lock window (aligned with bootcheck.sh / daemon)
+
+enum LockWindowMath {
+    static func parseHHMM(_ s: String) -> Int? {
+        let parts = s.split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
+        return h * 60 + m
+    }
+
+    /// `true` when current time falls in the locked night window (same rules as bootcheck.sh).
+    static func isInLockdownWindow(config: SleepConfig, now: Date = Date()) -> Bool {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: now)
+        let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        let bedMin = parseHHMM(config.bedtime) ?? 1380
+        let wakeMin = parseHHMM(config.wakeupTime) ?? 420
+        if bedMin > wakeMin {
+            return nowMin >= bedMin || nowMin < wakeMin
+        }
+        return nowMin >= bedMin && nowMin < wakeMin
+    }
+
+    /// ISO weekday 1 = Mon … 7 = Sun (matches config `days`)
+    static func isoWeekday(for date: Date) -> Int {
+        let cal = Calendar.current
+        let w = cal.component(.weekday, from: date)
+        return w == 1 ? 7 : w - 1
+    }
+
+    /// Double-ESC escape: allowed if wall clock is outside lock window, or today is not a contract day.
+    static func canEmergencyExit(config: SleepConfig, now: Date = Date()) -> Bool {
+        if !isInLockdownWindow(config: config, now: now) { return true }
+        if !config.activeDays.contains(isoWeekday(for: now)) { return true }
+        return false
+    }
+}
+
 // MARK: - Stats
 
 struct SleepStats {
@@ -171,27 +208,7 @@ class LockWindowController {
     private func checkWakeTime() {
         // 用"是否已经越过起床时间"来判断，而不是精确匹配 HH:mm 字符串。
         // 否则若 Mac 在 07:00 那一分钟处于睡眠，Timer 不跑，醒来后永远匹配不上，overlay 再也不退出。
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.hour, .minute], from: Date())
-        let nowMin = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
-        let wakeMin = Self.parseHHMM(config.wakeupTime) ?? 420   // 07:00
-        let bedMin  = Self.parseHHMM(config.bedtime)   ?? 1380   // 23:00
-
-        let inAwakeWindow: Bool
-        if bedMin > wakeMin {
-            // 正常场景：bed=23:00, wake=07:00。白天窗口 = [wake, bed)
-            inAwakeWindow = nowMin >= wakeMin && nowMin < bedMin
-        } else {
-            // 边界场景：bed=01:00, wake=08:00。锁定窗口 = [bed, wake)，白天窗口是它的补集
-            inAwakeWindow = !(nowMin >= bedMin && nowMin < wakeMin)
-        }
-        if inAwakeWindow { exit(0) }
-    }
-
-    private static func parseHHMM(_ s: String) -> Int? {
-        let parts = s.split(separator: ":")
-        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
-        return h * 60 + m
+        if !LockWindowMath.isInLockdownWindow(config: config, now: Date()) { exit(0) }
     }
 
     private func setupKeepAlive() {
@@ -386,6 +403,26 @@ class LockScreenView: NSView {
         )
         bottomLabel.autoresizingMask = [.width, .minYMargin]
         addSubview(bottomLabel)
+
+        let hint = NSTextField(frame: NSRect(x: 0, y: 28, width: bounds.width, height: 18))
+        hint.isBordered = false
+        hint.isEditable = false
+        hint.isSelectable = false
+        hint.backgroundColor = .clear
+        hint.alignment = .center
+        let hintPS = NSMutableParagraphStyle()
+        hintPS.alignment = .center
+        hint.attributedStringValue = NSAttributedString(
+            string: "异常时连按两下 ESC：重新校验时间，非锁机时段可退出",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.12),
+                .kern: 0.5,
+                .paragraphStyle: hintPS
+            ]
+        )
+        hint.autoresizingMask = [.width, .minYMargin]
+        addSubview(hint)
     }
 
     private func makeLabel(text: String, fontSize: CGFloat, color: NSColor, frame: NSRect) -> NSTextField {
@@ -426,6 +463,8 @@ class LockScreenView: NSView {
 
 class LockAppDelegate: NSObject, NSApplicationDelegate {
     var controller: LockWindowController?
+    private var lastEscapeAt: Date = .distantPast
+    private let escapeDoubleInterval: TimeInterval = 0.45
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let config = SleepConfig.load()
@@ -433,8 +472,28 @@ class LockAppDelegate: NSObject, NSApplicationDelegate {
         controller = LockWindowController(config: config, stats: stats)
         controller?.activate()
         NSApp.setActivationPolicy(.prohibited)
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { _ in nil }
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return nil }
+            // 53 = Escape — 双击：重新读盘 config + 当前时间，仅非锁机时段（或今日非契约日）可退出
+            if event.keyCode == 53 {
+                self.handleEscapeDoubleTap()
+            }
+            return nil
+        }
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { _ in nil }
+    }
+
+    private func handleEscapeDoubleTap() {
+        let now = Date()
+        if now.timeIntervalSince(lastEscapeAt) > escapeDoubleInterval {
+            lastEscapeAt = now
+            return
+        }
+        lastEscapeAt = .distantPast
+        let fresh = SleepConfig.load()
+        if LockWindowMath.canEmergencyExit(config: fresh, now: Date()) {
+            exit(0)
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { .terminateCancel }
